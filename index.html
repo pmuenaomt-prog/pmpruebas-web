@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Máquinas — pmpruebas</title>
+<style>
+  :root {
+    --fondo: #f4f6f8;
+    --tarjeta: #ffffff;
+    --texto: #1c2733;
+    --suave: #6b7785;
+    --borde: #dfe4ea;
+    --primario: #0b4f7c;
+    --ok: #1f8a4c;
+    --off: #b23b3b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--fondo);
+    color: var(--texto);
+  }
+  header {
+    background: var(--primario);
+    color: #fff;
+    padding: 20px 24px;
+  }
+  header h1 { margin: 0; font-size: 1.4rem; }
+  header p { margin: 4px 0 0; opacity: .8; font-size: .9rem; }
+  main { max-width: 1000px; margin: 24px auto; padding: 0 16px; }
+
+  .resumen { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  .chip {
+    background: var(--tarjeta);
+    border: 1px solid var(--borde);
+    border-radius: 10px;
+    padding: 10px 14px;
+    min-width: 130px;
+  }
+  .chip .num { font-size: 1.5rem; font-weight: 700; }
+  .chip .lbl { font-size: .8rem; color: var(--suave); }
+
+  .controles { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+  .controles input, .controles select, .controles button {
+    font: inherit;
+    padding: 8px 12px;
+    border: 1px solid var(--borde);
+    border-radius: 8px;
+    background: #fff;
+  }
+  .controles input { flex: 1; min-width: 200px; }
+  .controles button {
+    background: var(--primario);
+    color: #fff;
+    border-color: var(--primario);
+    cursor: pointer;
+  }
+
+  .tabla-wrap {
+    background: var(--tarjeta);
+    border: 1px solid var(--borde);
+    border-radius: 10px;
+    overflow-x: auto;
+  }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--borde); }
+  th { font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; color: var(--suave); background: #fafbfc; }
+  tr:last-child td { border-bottom: none; }
+  td.codigo { font-family: ui-monospace, Consolas, monospace; font-weight: 600; }
+  .estado { font-size: .8rem; font-weight: 600; padding: 3px 8px; border-radius: 999px; }
+  .estado.si { background: #e3f4ea; color: var(--ok); }
+  .estado.no { background: #f8e4e4; color: var(--off); }
+
+  .mensaje { padding: 24px; text-align: center; color: var(--suave); }
+  .mensaje.error { color: var(--off); }
+  footer { text-align: center; color: var(--suave); font-size: .8rem; margin: 20px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Máquinas de la planta</h1>
+  <p>Datos en vivo desde Supabase · proyecto pmpruebas</p>
+</header>
+
+<main>
+  <section class="resumen" id="resumen"></section>
+
+  <section class="controles">
+    <input id="buscar" type="search" placeholder="Buscar por código o nombre…">
+    <select id="filtroArea"><option value="">Todas las áreas</option></select>
+    <button id="recargar" type="button">Actualizar</button>
+  </section>
+
+  <section class="tabla-wrap">
+    <table>
+      <thead>
+        <tr><th>Código</th><th>Nombre</th><th>Área</th><th>Estado</th><th>Creada</th></tr>
+      </thead>
+      <tbody id="filas"></tbody>
+    </table>
+    <div class="mensaje" id="mensaje">Cargando máquinas…</div>
+  </section>
+
+  <footer id="pie"></footer>
+</main>
+
+<script>
+  // Conexión a Supabase. La clave "publishable" es pública por diseño:
+  // solo permite lo que las políticas RLS autorizan (aquí: leer la tabla maquinas).
+  const SUPABASE_URL = "https://vehcfhmtdyzflpktqauo.supabase.co";
+  const SUPABASE_KEY = "sb_publishable_a3UTNO2k5EXWczcfa8rgfA_VCVMpFkK";
+
+  let maquinas = [];
+
+  const $ = (id) => document.getElementById(id);
+
+  async function cargar() {
+    $("mensaje").textContent = "Cargando máquinas…";
+    $("mensaje").className = "mensaje";
+    $("mensaje").style.display = "block";
+    $("filas").innerHTML = "";
+    try {
+      const resp = await fetch(
+        `${SUPABASE_URL}/rest/v1/maquinas?select=*&order=codigo.asc`,
+        { headers: { apikey: SUPABASE_KEY } }
+      );
+      if (!resp.ok) throw new Error(`Supabase respondió ${resp.status}: ${await resp.text()}`);
+      maquinas = await resp.json();
+      llenarFiltroAreas();
+      pintar();
+      $("pie").textContent = "Actualizado: " + new Date().toLocaleString("es-CL");
+    } catch (err) {
+      $("mensaje").textContent = "No se pudieron cargar los datos. " + err.message;
+      $("mensaje").className = "mensaje error";
+    }
+  }
+
+  function llenarFiltroAreas() {
+    const actual = $("filtroArea").value;
+    const areas = [...new Set(maquinas.map(m => m.area))].sort();
+    $("filtroArea").innerHTML = '<option value="">Todas las áreas</option>' +
+      areas.map(a => `<option value="${escapar(a)}">${escapar(a)}</option>`).join("");
+    $("filtroArea").value = areas.includes(actual) ? actual : "";
+  }
+
+  function pintar() {
+    const texto = $("buscar").value.trim().toLowerCase();
+    const area = $("filtroArea").value;
+    const visibles = maquinas.filter(m =>
+      (!area || m.area === area) &&
+      (!texto || m.codigo.toLowerCase().includes(texto) || m.nombre.toLowerCase().includes(texto))
+    );
+
+    // Resumen
+    const porArea = {};
+    maquinas.forEach(m => { porArea[m.area] = (porArea[m.area] || 0) + 1; });
+    const activas = maquinas.filter(m => m.activa).length;
+    $("resumen").innerHTML =
+      chip(maquinas.length, "Total máquinas") +
+      chip(activas, "Activas") +
+      Object.entries(porArea).sort().map(([a, n]) => chip(n, a)).join("");
+
+    // Tabla
+    $("filas").innerHTML = visibles.map(m => `
+      <tr>
+        <td class="codigo">${escapar(m.codigo)}</td>
+        <td>${escapar(m.nombre)}</td>
+        <td>${escapar(m.area)}</td>
+        <td><span class="estado ${m.activa ? "si" : "no"}">${m.activa ? "Activa" : "Inactiva"}</span></td>
+        <td>${new Date(m.creado_en).toLocaleDateString("es-CL")}</td>
+      </tr>`).join("");
+
+    $("mensaje").style.display = visibles.length ? "none" : "block";
+    if (!visibles.length) {
+      $("mensaje").textContent = maquinas.length ? "Ninguna máquina coincide con el filtro." : "La tabla está vacía.";
+      $("mensaje").className = "mensaje";
+    }
+  }
+
+  function chip(num, lbl) {
+    return `<div class="chip"><div class="num">${num}</div><div class="lbl">${escapar(lbl)}</div></div>`;
+  }
+
+  function escapar(s) {
+    return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  $("buscar").addEventListener("input", pintar);
+  $("filtroArea").addEventListener("change", pintar);
+  $("recargar").addEventListener("click", cargar);
+  cargar();
+</script>
+</body>
+</html>
